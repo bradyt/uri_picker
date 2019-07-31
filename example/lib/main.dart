@@ -1,6 +1,7 @@
-import 'package:flutter/material.dart';
+// ignore_for_file: public_member_api_docs
 import 'dart:async';
 
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:uri_picker/uri_picker.dart';
 
@@ -47,10 +48,16 @@ class _MyAppState extends State<MyApp> {
               children: <Widget>[
                 Text(_uri ?? 'No uri yet'),
                 RaisedButton(
-                  child: Text('Pick URI'),
                   onPressed: () async {
                     await pickUri();
                   },
+                  child: Text('Pick URI'),
+                ),
+                RaisedButton(
+                  onPressed: () async {
+                    await pickUri();
+                  },
+                  child: Text('Pick URI'),
                 ),
               ],
             ),

@@ -3,12 +3,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:uri_picker/uri_picker.dart';
 
 void main() {
-  const MethodChannel channel = MethodChannel('uri_picker');
+  final channel = MethodChannel('info.tangential/uri_picker');
 
   setUp(() {
-    channel.setMockMethodCallHandler((MethodCall methodCall) async {
-      return '42';
-    });
+    channel.setMockMethodCallHandler((methodCall) async => '42');
   });
 
   tearDown(() {
