@@ -12,10 +12,23 @@ class UriPicker {
       MethodChannel('tangential.info/uri_picker');
 
   /// Uses system UI to pick a URI
-  static Future<String> pickUri() async {
+  static Future<String> performFileSearch() async {
     String uri;
     try {
-      uri = await _channel.invokeMethod<dynamic>('pickUri') as String;
+      uri = await _channel.invokeMethod<dynamic>('performFileSearch') as String;
+    } on PlatformException {
+      rethrow;
+    } on MissingPluginException {
+      rethrow;
+    }
+    return uri;
+  }
+
+  /// Uses system UI to create a new document and return the uri
+  static Future<String> createFile() async {
+    String uri;
+    try {
+      uri = await _channel.invokeMethod<dynamic>('createFile') as String;
     } on PlatformException {
       rethrow;
     } on MissingPluginException {
@@ -38,33 +51,6 @@ class UriPicker {
     return displayName;
   }
 
-  /// Check if URI is openable.
-  static Future<void> isUriOpenable(String uri) async {
-    try {
-      await _channel.invokeMethod<dynamic>('isUriOpenable', <String, String>{
-        'uri': uri,
-      });
-    } on PlatformException {
-      rethrow;
-    } on MissingPluginException {
-      rethrow;
-    }
-  }
-
-  /// Get permissions to persist across device reboot.
-  static Future<void> takePersistablePermission(String uri) async {
-    try {
-      await _channel
-          .invokeMethod<dynamic>('takePersistablePermission', <String, String>{
-        'uri': uri,
-      });
-    } on PlatformException {
-      rethrow;
-    } on MissingPluginException {
-      rethrow;
-    }
-  }
-
   /// Get content from URI.
   static Future<String> readTextFromUri(String uri) async {
     String fileContents;
@@ -80,12 +66,11 @@ class UriPicker {
   }
 
   /// Write content to URI.
-  static Future<void> alterDocument(String uri, String newContents) async {
-    await isUriOpenable(uri);
+  static Future<void> appendToFile(String uri, String contentsToAppend) async {
     try {
-      await _channel.invokeMethod<dynamic>('alterDocument', <String, String>{
+      await _channel.invokeMethod<dynamic>('appendToFile', <String, String>{
         'uri': uri,
-        'newContents': newContents,
+        'contentsToAppend': contentsToAppend,
       });
     } on PlatformException catch (e) {
       print('PlatformException $e');

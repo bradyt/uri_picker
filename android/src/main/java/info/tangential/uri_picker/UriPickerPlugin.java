@@ -28,10 +28,10 @@ import java.io.InputStreamReader;
 public class UriPickerPlugin implements MethodCallHandler, ActivityResultListener {
 
   private static final int OPEN_REQUEST_CODE = 0;
+  private static final int WRITE_REQUEST_CODE = 1;
 
-
-  private Result result;
   private final Registrar registrar;
+  private Result result;
 
   /**
    * Plugin registration.
@@ -51,25 +51,25 @@ public class UriPickerPlugin implements MethodCallHandler, ActivityResultListene
   @Override
   public void onMethodCall(@NonNull MethodCall call, @NonNull Result result) {
     this.result = result;
-    if (call.method.equals("pickUri")) {
+    if (call.method.equals("performFileSearch")) {
       performFileSearch();
+    } else if (call.method.equals("createFile")) {
+      createFile();
     } else {
       Uri uri = Uri.parse((String) call.argument("uri"));
       switch (call.method) {
         case "getDisplayName":
           getDisplayName(uri);
           break;
-        case "isUriOpenable":
-          isUriOpenable(uri);
-          break;
-        case "takePersistablePermission":
-          takePersistablePermission(uri);
-          break;
         case "readTextFromUri":
-          readTextFromUri(uri);
+          try {
+            result.success(readTextFromUri(uri));
+          } catch (IOException e) {
+            e.printStackTrace();
+          }
           break;
-        case "alterDocument":
-          alterDocument(uri, (String) call.argument("newContents"));
+        case "appendToFile":
+          appendToFile(uri, (String) call.argument("contentsToAppend"));
           break;
         default:
           result.notImplemented();
@@ -78,23 +78,34 @@ public class UriPickerPlugin implements MethodCallHandler, ActivityResultListene
   }
 
   private void performFileSearch() {
-    Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+    documentRequest(Intent.ACTION_OPEN_DOCUMENT, OPEN_REQUEST_CODE);
+  }
+
+  private void createFile() {
+    documentRequest(Intent.ACTION_CREATE_DOCUMENT, WRITE_REQUEST_CODE);
+  }
+
+  private void documentRequest(String action, int requestCode) {
+    Intent intent = new Intent(action);
     intent.addCategory(Intent.CATEGORY_OPENABLE);
     intent.setType("text/plain");
     intent.setFlags(
         Intent.FLAG_GRANT_READ_URI_PERMISSION
             | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
             | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
-    registrar.activity().startActivityForResult(intent, OPEN_REQUEST_CODE);
+    registrar.activity().startActivityForResult(intent, requestCode);
   }
 
   @Override
   public boolean onActivityResult(int requestCode, int resultCode, Intent resultData) {
-    if (requestCode == OPEN_REQUEST_CODE && resultCode == Activity.RESULT_OK) {
-      Uri uri = resultData.getData();
-      if (uri != null) {
-        result.success(uri.toString());
-        return true;
+    if (resultCode == Activity.RESULT_OK) {
+      if (requestCode == OPEN_REQUEST_CODE || requestCode == WRITE_REQUEST_CODE) {
+        Uri uri = resultData.getData();
+        if (uri != null) {
+          takePersistablePermission(uri);
+          result.success(uri.toString());
+          return true;
+        }
       }
     }
     result.error("onActivityResult",
@@ -105,7 +116,7 @@ public class UriPickerPlugin implements MethodCallHandler, ActivityResultListene
   private void getDisplayName(Uri uri) {
     String displayName = null;
     try (Cursor cursor = registrar.activity().getContentResolver()
-        .query(uri, null, null, null, null, null);) {
+        .query(uri, null, null, null, null, null)) {
       if (cursor != null && cursor.moveToFirst()) {
         displayName = cursor.getString(
             cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME));
@@ -114,91 +125,62 @@ public class UriPickerPlugin implements MethodCallHandler, ActivityResultListene
     result.success(displayName);
   }
 
-  private void isUriOpenable(Uri uri) {
-    String name = null;
-    String message = null;
-    try (InputStream inputStream = registrar.activity().getContentResolver()
-        .openInputStream(uri);) {
-      result.success(null);
-      return;
-    } catch (FileNotFoundException e) {
-      name = e.getClass().getName();
-      message = e.getMessage();
-    } catch (IOException e) {
-      name = e.getClass().getName();
-      message = e.getMessage();
-    }
-    result.error(name, message, null);
-  }
-
   private void takePersistablePermission(Uri uri) {
     try {
       registrar.activeContext().getContentResolver()
-          .takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+          .takePersistableUriPermission(uri,
+              Intent.FLAG_GRANT_READ_URI_PERMISSION
+                  | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
     } catch (Exception e) {
       e.printStackTrace();
-    } finally {
-      result.success(null);
     }
   }
 
-  private void readTextFromUri(Uri uri) {
-    StringBuilder stringBuilder = new StringBuilder();
-    String name = null;
-    String message = null;
-    try (InputStream inputStream = registrar.activeContext().getContentResolver()
-        .openInputStream(uri);) {
-      BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream));
-      String line;
-      while ((line = reader.readLine()) != null) {
-        stringBuilder.append(line);
-        stringBuilder.append("\n");
-      }
+  private void appendToFile(Uri uri, String contentsToAppend) {
+    try {
+      alterDocument(uri, readTextFromUri(uri) + contentsToAppend);
     } catch (IOException e) {
       e.printStackTrace();
+      result.error("", "Could not read before writing to " + uri.toString(), null);
     }
-    result.success(stringBuilder.toString());
+  }
+
+  private String readTextFromUri(Uri uri) throws IOException {
+    InputStream inputStream = registrar.activeContext().getContentResolver()
+        .openInputStream(uri);
+    BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream));
+    StringBuilder stringBuilder = new StringBuilder();
+    String line;
+    while ((line = reader.readLine()) != null) {
+      stringBuilder.append(line);
+      stringBuilder.append("\n");
+    }
+    if (inputStream != null) {
+      inputStream.close();
+    }
+    return stringBuilder.toString();
   }
 
   private void alterDocument(Uri uri, String newContents) {
-    String name = null;
-    String message = null;
-    ParcelFileDescriptor pfd = null;
-    FileOutputStream fileOutputStream = null;
     try {
-      pfd = registrar.activeContext().getContentResolver().openFileDescriptor(uri, "w");
+      ParcelFileDescriptor pfd = registrar.activeContext().getContentResolver()
+          .openFileDescriptor(uri, "w");
       if (pfd != null) {
-        fileOutputStream = new FileOutputStream(pfd.getFileDescriptor());
-        try {
-          fileOutputStream.write((newContents).getBytes());
-        } catch (IOException e) {
-          name = e.getClass().getName();
-          message = e.getMessage();
-        } finally {
-          try {
-            fileOutputStream.close();
-          } catch (IOException e) {
-            name = e.getClass().getName();
-            message = e.getMessage();
-          }
-        }
+        FileOutputStream fileOutputStream = new FileOutputStream(pfd.getFileDescriptor());
+        fileOutputStream.write(newContents.getBytes());
+        fileOutputStream.close();
+        pfd.close();
+        result.success(null);
+      } else {
+        result.error("", "openFileDescriptor returned null, for " + uri.toString(), null);
       }
     } catch (FileNotFoundException e) {
-      name = e.getClass().getName();
-      message = e.getMessage();
-    } finally {
-      try {
-        if (pfd != null) {
-          pfd.close();
-        }
-      } catch (IOException e) {
-        name = e.getClass().getName();
-        message = e.getMessage();
-      }
-    }
-    if (name == null) {
-      result.success(null);
-    } else {
+      String name = e.getClass().getName();
+      String message = e.getMessage();
+      result.error(name, message, null);
+    } catch (IOException e) {
+      String name = e.getClass().getName();
+      String message = e.getMessage();
       result.error(name, message, null);
     }
   }
